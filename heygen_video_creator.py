@@ -190,10 +190,10 @@ def create_video_from_text(driver, text, title, downloads_dir):
     Steps:
     1. Navigate to /video-agent
     2. Switch mode from Chat to Generate
-    3. Paste the script text into the input area
-    4. Click the submit button
-    5. Wait for video generation to complete
-    6. Download the video
+    3. Set aspect ratio to Portrait
+    4. Paste the script text into the input area
+    5. Click the submit button
+    6. Wait for video generation to complete and download
     """
     print(f"\n  Creating video: '{title}'")
 
@@ -252,8 +252,82 @@ def create_video_from_text(driver, text, title, downloads_dir):
 
     time.sleep(2)
 
-    # Step 3: Paste script text into the input area
-    print("  Step 3: Entering script text...")
+    # Step 3: Set aspect ratio to Portrait
+    # The toolbar has two "Auto" dropdowns. The second one (aspect ratio icon)
+    # controls orientation with options: Auto, Portrait, Landscape.
+    print("  Step 3: Setting aspect ratio to Portrait...")
+    portrait_selected = False
+    try:
+        # Find all elements containing "Auto" text that look like dropdown triggers
+        # The aspect ratio dropdown is the second "Auto" button in the toolbar
+        auto_buttons = []
+        for sel in [
+            '//button[.//text()="Auto"]',
+            '//div[contains(@class,"dropdown") or contains(@class,"select")]//*[text()="Auto"]/ancestor::button',
+            '//*[text()="Auto"]/ancestor::*[self::button or @role="button"]',
+        ]:
+            try:
+                found = driver.find_elements(By.XPATH, sel)
+                for btn in found:
+                    if btn.is_displayed() and btn not in auto_buttons:
+                        auto_buttons.append(btn)
+            except Exception:
+                continue
+
+        # The second "Auto" button is the aspect ratio dropdown
+        if len(auto_buttons) >= 2:
+            auto_buttons[1].click()
+            time.sleep(1)
+            # Click "Portrait" from the dropdown
+            for portrait_sel in [
+                '//*[text()="Portrait"]',
+                '//div[text()="Portrait"]',
+                '//span[text()="Portrait"]',
+            ]:
+                try:
+                    p_els = driver.find_elements(By.XPATH, portrait_sel)
+                    for p_el in p_els:
+                        if p_el.is_displayed():
+                            p_el.click()
+                            portrait_selected = True
+                            print("    Portrait mode selected.")
+                            break
+                    if portrait_selected:
+                        break
+                except Exception:
+                    continue
+        elif len(auto_buttons) == 1:
+            # Maybe there's only one "Auto" and it's the aspect ratio one
+            auto_buttons[0].click()
+            time.sleep(1)
+            for portrait_sel in [
+                '//*[text()="Portrait"]',
+                '//div[text()="Portrait"]',
+                '//span[text()="Portrait"]',
+            ]:
+                try:
+                    p_els = driver.find_elements(By.XPATH, portrait_sel)
+                    for p_el in p_els:
+                        if p_el.is_displayed():
+                            p_el.click()
+                            portrait_selected = True
+                            print("    Portrait mode selected.")
+                            break
+                    if portrait_selected:
+                        break
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"    Aspect ratio note: {e}")
+
+    if not portrait_selected:
+        print("    WARNING: Could not set Portrait mode automatically.")
+        print("    Please set it manually if needed.")
+
+    time.sleep(1)
+
+    # Step 4: Paste script text into the input area
+    print("  Step 4: Entering script text...")
     script_entered = False
 
     for selector in [
@@ -337,8 +411,8 @@ def create_video_from_text(driver, text, title, downloads_dir):
 
     time.sleep(1)
 
-    # Step 4: Click the submit/send button (the circular arrow icon)
-    print("  Step 4: Submitting for generation...")
+    # Step 5: Click the submit/send button (the circular arrow icon)
+    print("  Step 5: Submitting for generation...")
     submitted = False
     for selector in [
         'button[type="submit"]',
@@ -376,7 +450,7 @@ def create_video_from_text(driver, text, title, downloads_dir):
     time.sleep(5)
 
     # Step 5: Wait for video generation and download
-    print("  Step 5: Waiting for video generation...")
+    print("  Step 6: Waiting for video generation...")
     download_video_from_heygen(driver, title, downloads_dir)
 
 
