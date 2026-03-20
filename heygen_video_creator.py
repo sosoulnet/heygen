@@ -409,62 +409,67 @@ def download_video_from_heygen(driver, title, downloads_dir):
 
     print("    Waiting for video to finish generating...")
     start_time = time.time()
+    last_url = None
 
     while time.time() - start_time < VIDEO_WAIT:
         time.sleep(10)
         elapsed = int(time.time() - start_time)
 
         try:
-            # Check if video generation is complete by looking for a video player
-            video_els = driver.find_elements(By.TAG_NAME, "video")
-            has_video = any(vel.is_displayed() for vel in video_els)
+            # Scan all <video> elements for a generated_videos .mp4 URL.
+            # The page always has video elements (timeline thumbnails etc.)
+            # so we specifically look for the final generated output URL.
+            video_url = driver.execute_script("""
+                var videos = document.querySelectorAll('video');
+                var mp4Urls = [];
+                for (var i = 0; i < videos.length; i++) {
+                    var src = videos[i].src || '';
+                    if (src.indexOf('.mp4') !== -1 && src.indexOf('blob:') === -1) {
+                        mp4Urls.push(src);
+                    }
+                }
+                // Prefer generated_videos URLs (final output)
+                for (var j = 0; j < mp4Urls.length; j++) {
+                    if (mp4Urls[j].indexOf('generated_videos') !== -1) return mp4Urls[j];
+                }
+                return mp4Urls.length > 0 ? mp4Urls[0] : null;
+            """)
 
-            if has_video:
-                print(f"    Video detected on page! ({elapsed}s elapsed)")
+            if video_url and video_url != last_url:
+                last_url = video_url
+                is_generated = "generated_videos" in video_url
+                if is_generated:
+                    print(f"    Generated video detected! ({elapsed}s elapsed)")
+                else:
+                    print(f"    Video URL found (not generated_videos yet, "
+                          f"may be preview). ({elapsed}s elapsed)")
+                    # Keep waiting for the generated_videos URL
+                    continue
+
+                # Use the browser itself to download — it already has the
+                # right cookies/auth and Chrome's download dir is configured.
+                # We open the URL in a new tab to trigger a file download,
+                # then close the tab and wait for the download to finish.
+                print(f"    Triggering browser download...")
+                current_window = driver.current_window_handle
+                driver.execute_script("window.open(arguments[0], '_blank');",
+                                      video_url)
                 time.sleep(3)
+                # Close the new tab if it opened
+                if len(driver.window_handles) > 1:
+                    for handle in driver.window_handles:
+                        if handle != current_window:
+                            driver.switch_to.window(handle)
+                            driver.close()
+                    driver.switch_to.window(current_window)
 
-                # Look for a direct .mp4 URL from any <video> element on the page.
-                # The page has multiple video elements (main player + timeline
-                # thumbnails). Prefer files2.heygen.ai generated_videos URLs
-                # as these are the final output.
-                video_url = driver.execute_script("""
-                    var videos = document.querySelectorAll('video');
-                    var mp4Urls = [];
-                    for (var i = 0; i < videos.length; i++) {
-                        var src = videos[i].src || '';
-                        if (src.indexOf('.mp4') !== -1 && src.indexOf('blob:') === -1) {
-                            mp4Urls.push(src);
-                        }
-                    }
-                    // Prefer generated_videos URLs (final output) over tmp_resource
-                    for (var j = 0; j < mp4Urls.length; j++) {
-                        if (mp4Urls[j].indexOf('generated_videos') !== -1) return mp4Urls[j];
-                    }
-                    return mp4Urls.length > 0 ? mp4Urls[0] : null;
-                """)
-                if video_url:
-                    print(f"    Found .mp4 URL, downloading...")
-                    # Use cookies from the browser session for the download
-                    cookies = driver.get_cookies()
-                    opener = urllib.request.build_opener()
-                    cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
-                    opener.addheaders = [
-                        ("Cookie", cookie_str),
-                        ("Referer", HEYGEN_URL),
-                        ("User-Agent", driver.execute_script("return navigator.userAgent")),
-                    ]
-                    urllib.request.install_opener(opener)
-                    urllib.request.urlretrieve(video_url, str(output_path))
-                    print(f"    Saved: {output_path}")
-                    return
+                wait_for_download(downloads_dir, title)
+                return
 
-                print("    No .mp4 URL found in video elements.")
-                print("    Please download manually.")
-                break
-
-            # Still waiting - no video element yet
+            # Still waiting
             page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
-            if any(w in page_text for w in ["generating", "processing", "creating", "loading"]):
+            if any(w in page_text for w in
+                   ["generating", "processing", "creating", "loading"]):
                 print(f"    Still generating... ({elapsed}s elapsed)")
             elif "failed" in page_text or "error" in page_text:
                 print("    Video generation may have failed!")
