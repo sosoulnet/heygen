@@ -89,6 +89,25 @@ class HeyGenGUI:
         self.folder_var.trace_add("write", self._on_folder_change)
         folder_frame.columnconfigure(0, weight=1)
 
+        # ── Download Folder ───────────────────────────────────────
+        dl_frame = ttk.LabelFrame(main, text="Download Folder", padding=10)
+        dl_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.download_folder_var = tk.StringVar()
+        ttk.Entry(dl_frame, textvariable=self.download_folder_var, width=50).grid(
+            row=0, column=0, sticky=tk.EW, pady=2
+        )
+        ttk.Button(dl_frame, text="Browse...", command=self._browse_download_folder).grid(
+            row=0, column=1, padx=(8, 0), pady=2
+        )
+
+        ttk.Label(
+            dl_frame, text="Leave blank to save in a 'downloads' subfolder of the text files folder.",
+            foreground="gray"
+        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(2, 0))
+
+        dl_frame.columnconfigure(0, weight=1)
+
         # ── Settings ─────────────────────────────────────────────
         settings_frame = ttk.LabelFrame(main, text="Video Settings", padding=10)
         settings_frame.pack(fill=tk.X, pady=(0, 10))
@@ -154,6 +173,11 @@ class HeyGenGUI:
         if folder:
             self.folder_var.set(folder)
 
+    def _browse_download_folder(self):
+        folder = filedialog.askdirectory(title="Select download folder for videos")
+        if folder:
+            self.download_folder_var.set(folder)
+
     def _on_folder_change(self, *_args):
         folder = self.folder_var.get().strip()
         if folder and Path(folder).is_dir():
@@ -179,6 +203,7 @@ class HeyGenGUI:
         self.email_var.set(data.get("email", os.environ.get("HEYGEN_EMAIL", "")))
         self.password_var.set(data.get("password", os.environ.get("HEYGEN_PASSWORD", "")))
         self.folder_var.set(data.get("folder", ""))
+        self.download_folder_var.set(data.get("download_folder", ""))
         self.orientation_var.set(data.get("orientation", "portrait"))
         self.avatar_var.set(data.get("avatar", "none"))
         self.headless_var.set(data.get("headless", False))
@@ -189,6 +214,7 @@ class HeyGenGUI:
             "email": self.email_var.get().strip(),
             "password": self.password_var.get().strip(),
             "folder": self.folder_var.get().strip(),
+            "download_folder": self.download_folder_var.get().strip(),
             "orientation": self.orientation_var.get(),
             "avatar": self.avatar_var.get(),
             "headless": self.headless_var.get(),
@@ -275,7 +301,11 @@ class HeyGenGUI:
         import heygen_video_creator as hvc
 
         folder = Path(folder).resolve()
-        downloads_dir = folder / "downloads"
+        dl_folder = self.download_folder_var.get().strip()
+        if dl_folder and Path(dl_folder).is_dir():
+            downloads_dir = Path(dl_folder).resolve()
+        else:
+            downloads_dir = folder / "downloads"
         downloads_dir.mkdir(parents=True, exist_ok=True)
 
         headless = self.headless_var.get()
