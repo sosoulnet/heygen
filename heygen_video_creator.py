@@ -185,138 +185,83 @@ def login(driver, email=None, password=None):
 
 
 def create_video_from_text(driver, text, title, downloads_dir):
-    """Create a single video from text using HeyGen Studio UI.
+    """Create a single video using the HeyGen Video Agent page.
 
     Steps:
-    1. Navigate to create a new video
-    2. Select portrait mode
-    3. Skip avatar selection (no avatar)
-    4. Paste script text
-    5. Submit for generation
-    6. Wait for completion
-    7. Download the video
+    1. Navigate to /video-agent
+    2. Switch mode from Chat to Generate
+    3. Paste the script text into the input area
+    4. Click the submit button
+    5. Wait for video generation to complete
+    6. Download the video
     """
     print(f"\n  Creating video: '{title}'")
 
-    # Step 1: Navigate to create a new video
-    print("  Step 1: Opening video creation...")
-    driver.get(f"{HEYGEN_URL}/create")
-    time.sleep(3)
+    # Step 1: Navigate to the Video Agent page
+    print("  Step 1: Opening Video Agent...")
+    driver.get(f"{HEYGEN_URL}/video-agent")
+    time.sleep(5)
 
-    # Step 2: Select portrait mode
-    # Look for portrait/aspect ratio option in the creation dialog
-    print("  Step 2: Selecting portrait mode...")
+    # Step 2: Switch to "Generate" mode (default is "Chat")
+    print("  Step 2: Switching to Generate mode...")
+    generate_selected = False
     try:
-        # Try clicking portrait option — common selectors for aspect ratio buttons
-        portrait_clicked = False
+        # Click the "Chat" dropdown button to open the mode menu
         for selector in [
-            # Text-based matches
-            '//button[contains(text(), "Portrait")]',
-            '//div[contains(text(), "Portrait")]',
-            '//span[contains(text(), "Portrait")]',
-            # Aspect ratio indicators (9:16 is portrait)
-            '//*[contains(text(), "9:16")]',
-            '//button[contains(text(), "9:16")]',
-            # Icon/aria-label based
-            '[aria-label*="portrait" i]',
-            '[data-testid*="portrait" i]',
-            '[class*="portrait" i]',
+            '//button[contains(text(), "Chat")]',
+            '//div[contains(text(), "Chat")]//ancestor::button',
+            '//span[contains(text(), "Chat")]//ancestor::button',
+            # Look for a dropdown trigger near "Chat" text
+            '//*[contains(text(), "Chat")]/parent::*[self::button or self::div[@role="button"]]',
         ]:
             try:
-                if selector.startswith("//") or selector.startswith("//*"):
-                    els = driver.find_elements(By.XPATH, selector)
-                else:
-                    els = driver.find_elements(By.CSS_SELECTOR, selector)
+                els = driver.find_elements(By.XPATH, selector)
                 for el in els:
                     if el.is_displayed():
                         el.click()
-                        portrait_clicked = True
-                        print("    Portrait mode selected.")
+                        time.sleep(1)
+                        # Now click "Generate" from the dropdown
+                        for gen_sel in [
+                            '//div[contains(text(), "Generate")]',
+                            '//span[contains(text(), "Generate")]',
+                            '//*[contains(text(), "Generate")]',
+                        ]:
+                            try:
+                                gen_els = driver.find_elements(By.XPATH, gen_sel)
+                                for gen_el in gen_els:
+                                    if gen_el.is_displayed():
+                                        gen_el.click()
+                                        generate_selected = True
+                                        print("    Generate mode selected.")
+                                        break
+                                if generate_selected:
+                                    break
+                            except Exception:
+                                continue
                         break
-                if portrait_clicked:
+                if generate_selected:
                     break
             except Exception:
                 continue
-
-        if not portrait_clicked:
-            print("    Could not find portrait button — will try after entering studio.")
     except Exception as e:
-        print(f"    Portrait selection note: {e}")
+        print(f"    Mode switch note: {e}")
+
+    if not generate_selected:
+        print("    WARNING: Could not switch to Generate mode automatically.")
+        print("    Please switch to Generate mode manually if needed.")
 
     time.sleep(2)
 
-    # Step 3: Click "Start from scratch" or "Create Video" or "Blank" to enter studio
-    print("  Step 3: Entering studio editor...")
-    studio_entered = False
-    for selector in [
-        '//button[contains(text(), "Start from scratch")]',
-        '//div[contains(text(), "Start from scratch")]',
-        '//span[contains(text(), "Start from scratch")]',
-        '//button[contains(text(), "Create")]',
-        '//button[contains(text(), "Blank")]',
-        '//div[contains(text(), "Blank")]',
-        '//span[contains(text(), "Blank")]',
-        '//div[contains(@class, "blank")]',
-        '//button[contains(text(), "Create a Video")]',
-        '//a[contains(text(), "Create a Video")]',
-    ]:
-        try:
-            els = driver.find_elements(By.XPATH, selector)
-            for el in els:
-                if el.is_displayed():
-                    el.click()
-                    studio_entered = True
-                    print("    Entered studio.")
-                    break
-            if studio_entered:
-                break
-        except Exception:
-            continue
-
-    time.sleep(5)
-
-    # Step 4: Remove avatar if one was auto-added
-    print("  Step 4: Ensuring no avatar...")
-    try:
-        # Look for avatar on canvas and try to remove/delete it
-        for selector in [
-            '[data-testid*="avatar" i]',
-            '[class*="avatar" i]',
-            '//div[contains(@class, "avatar")]',
-        ]:
-            try:
-                if selector.startswith("//"):
-                    els = driver.find_elements(By.XPATH, selector)
-                else:
-                    els = driver.find_elements(By.CSS_SELECTOR, selector)
-                for el in els:
-                    if el.is_displayed():
-                        # Click to select, then press Delete
-                        el.click()
-                        time.sleep(0.5)
-                        ActionChains(driver).send_keys(Keys.DELETE).perform()
-                        time.sleep(0.5)
-                        print("    Removed avatar from canvas.")
-                        break
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    # Step 5: Paste script text into the script panel
-    print("  Step 5: Entering script text...")
+    # Step 3: Paste script text into the input area
+    print("  Step 3: Entering script text...")
     script_entered = False
 
-    # The script panel is typically on the left side of the studio
     for selector in [
-        'textarea[placeholder*="script" i]',
-        'textarea[placeholder*="text" i]',
-        'textarea[placeholder*="type" i]',
-        '[data-testid*="script" i] textarea',
-        '[class*="script" i] textarea',
-        '[contenteditable="true"]',
+        'textarea[placeholder*="video idea" i]',
+        'textarea[placeholder*="Describe" i]',
+        'textarea[placeholder*="idea" i]',
+        'div[contenteditable="true"]',
         'div[role="textbox"]',
-        '.script-editor textarea',
         'textarea',
     ]:
         try:
@@ -324,13 +269,13 @@ def create_video_from_text(driver, text, title, downloads_dir):
             for el in els:
                 if el.is_displayed():
                     el.click()
-                    time.sleep(0.3)
+                    time.sleep(0.5)
                     # Clear existing text
                     el.send_keys(Keys.CONTROL + "a")
                     time.sleep(0.2)
                     el.send_keys(Keys.DELETE)
                     time.sleep(0.2)
-                    # Type new text (use JS for reliability with long text)
+                    # Type text using JS for reliability with long text
                     if el.tag_name == "textarea":
                         driver.execute_script(
                             "arguments[0].value = arguments[1]; "
@@ -352,25 +297,28 @@ def create_video_from_text(driver, text, title, downloads_dir):
             continue
 
     if not script_entered:
-        print("    WARNING: Could not find script input field!")
-        print("    Please enter the script manually. Text:")
-        print(f"    {text[:100]}...")
+        print("    WARNING: Could not find text input field!")
+        print("    Please enter the script manually.")
+        print(f"    Text: {text[:100]}...")
         input("    Press Enter when done...")
 
-    time.sleep(2)
+    time.sleep(1)
 
-    # Step 6: Submit for video generation
-    print("  Step 6: Submitting for generation...")
+    # Step 4: Click the submit/send button (the circular arrow icon)
+    print("  Step 4: Submitting for generation...")
     submitted = False
     for selector in [
-        '//button[contains(text(), "Submit")]',
-        '//button[contains(text(), "Generate")]',
-        '//button[contains(text(), "Create")]',
-        '//button[contains(text(), "Render")]',
-        '[data-testid*="submit" i]',
-        '[data-testid*="generate" i]',
-        'button[class*="submit" i]',
-        'button[class*="generate" i]',
+        'button[type="submit"]',
+        'button[aria-label*="send" i]',
+        'button[aria-label*="submit" i]',
+        'button[aria-label*="generate" i]',
+        # The circular arrow button next to the textarea
+        '//button[contains(@class, "send") or contains(@class, "submit")]',
+        # SVG-based button (the arrow icon)
+        '//textarea/ancestor::form//button',
+        '//textarea/following::button[1]',
+        # Fallback: buttons near the text input
+        '//div[contains(@class, "input")]//button',
     ]:
         try:
             if selector.startswith("//"):
@@ -390,63 +338,59 @@ def create_video_from_text(driver, text, title, downloads_dir):
 
     if not submitted:
         print("    WARNING: Could not find submit button!")
-        input("    Please click Submit manually, then press Enter...")
+        input("    Please click the submit button manually, then press Enter...")
 
-    time.sleep(3)
+    time.sleep(5)
 
-    # Handle any confirmation dialogs
-    for selector in [
-        '//button[contains(text(), "Confirm")]',
-        '//button[contains(text(), "Yes")]',
-        '//button[contains(text(), "OK")]',
-        '//button[contains(text(), "Continue")]',
-    ]:
-        try:
-            els = driver.find_elements(By.XPATH, selector)
-            for el in els:
-                if el.is_displayed():
-                    el.click()
-                    time.sleep(1)
-                    break
-        except Exception:
-            continue
-
-    # Step 7: Wait for video generation and download
-    print("  Step 7: Waiting for video generation...")
+    # Step 5: Wait for video generation and download
+    print("  Step 5: Waiting for video generation...")
     download_video_from_heygen(driver, title, downloads_dir)
 
 
 def download_video_from_heygen(driver, title, downloads_dir):
-    """Navigate to My Videos and download the most recent video."""
-    # Go to the videos page to monitor and download
-    time.sleep(5)
-    driver.get(f"{HEYGEN_URL}/videos")
-    time.sleep(5)
+    """Wait for video generation on the Video Agent page and download it.
 
+    The Video Agent generates the video inline on the same page.
+    We wait for a video player or download link to appear, then download.
+    If that fails, we check /videos as a fallback.
+    """
     downloads_dir.mkdir(parents=True, exist_ok=True)
     output_path = downloads_dir / f"{title}.mp4"
 
-    # Wait for the video to finish processing
-    print("    Waiting for video to finish processing...")
+    print("    Waiting for video to finish generating...")
     start_time = time.time()
 
     while time.time() - start_time < VIDEO_WAIT:
-        # Refresh to check status
-        driver.refresh()
         time.sleep(10)
+        elapsed = int(time.time() - start_time)
 
-        # Look for a completed video (download button or "completed" status)
         try:
-            # Check if there's a video ready for download
+            # Check if a video element appeared on the page
+            video_els = driver.find_elements(By.TAG_NAME, "video")
+            for vel in video_els:
+                src = vel.get_attribute("src")
+                if src and src.startswith("http"):
+                    print(f"    Video ready! Downloading...")
+                    urllib.request.urlretrieve(src, str(output_path))
+                    print(f"    Saved: {output_path}")
+                    return
+
+            # Check for source elements inside video tags
+            source_els = driver.find_elements(By.CSS_SELECTOR, "video source")
+            for sel_el in source_els:
+                src = sel_el.get_attribute("src")
+                if src and src.startswith("http"):
+                    print(f"    Video ready! Downloading...")
+                    urllib.request.urlretrieve(src, str(output_path))
+                    print(f"    Saved: {output_path}")
+                    return
+
+            # Look for a download button on the page
             for selector in [
-                '//button[contains(@aria-label, "download") or contains(@aria-label, "Download")]',
-                '//a[contains(@aria-label, "download") or contains(@aria-label, "Download")]',
-                '[data-testid*="download" i]',
-                'button[class*="download" i]',
                 '//button[contains(text(), "Download")]',
-                # Three-dot menu on video card
-                '[data-testid*="more" i]',
-                'button[aria-label="More"]',
+                '//a[contains(text(), "Download")]',
+                '[aria-label*="download" i]',
+                '[data-testid*="download" i]',
             ]:
                 try:
                     if selector.startswith("//"):
@@ -454,42 +398,19 @@ def download_video_from_heygen(driver, title, downloads_dir):
                     else:
                         els = driver.find_elements(By.CSS_SELECTOR, selector)
                     for el in els:
-                        if el.is_displayed():
+                        if el.is_displayed() and el.is_enabled():
                             el.click()
-                            time.sleep(1)
-
-                            # If we clicked a menu, look for download option inside
-                            for dl_sel in [
-                                '//div[contains(text(), "Download")]',
-                                '//span[contains(text(), "Download")]',
-                                '//a[contains(text(), "Download")]',
-                                '//button[contains(text(), "Download")]',
-                                '[data-testid*="download" i]',
-                            ]:
-                                try:
-                                    if dl_sel.startswith("//"):
-                                        dl_els = driver.find_elements(By.XPATH, dl_sel)
-                                    else:
-                                        dl_els = driver.find_elements(By.CSS_SELECTOR, dl_sel)
-                                    for dl_el in dl_els:
-                                        if dl_el.is_displayed():
-                                            dl_el.click()
-                                            time.sleep(5)
-                                            print(f"    Download initiated!")
-
-                                            # Wait for download to complete
-                                            wait_for_download(downloads_dir, title)
-                                            return
-                                except Exception:
-                                    continue
+                            time.sleep(5)
+                            print("    Download initiated!")
+                            wait_for_download(downloads_dir, title)
+                            return
                 except Exception:
                     continue
 
-            # Check if video is still processing
+            # Still waiting
             page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
-            if "processing" in page_text or "generating" in page_text or "pending" in page_text:
-                elapsed = int(time.time() - start_time)
-                print(f"    Still processing... ({elapsed}s elapsed)")
+            if any(w in page_text for w in ["generating", "processing", "creating", "loading"]):
+                print(f"    Still generating... ({elapsed}s elapsed)")
             elif "failed" in page_text or "error" in page_text:
                 print("    Video generation may have failed!")
                 break
@@ -497,30 +418,22 @@ def download_video_from_heygen(driver, title, downloads_dir):
         except Exception as e:
             print(f"    Check error: {e}")
 
-    # Fallback: try to get the video URL from the page and download directly
+    # Fallback: check the /videos page
+    print("    Checking /videos page as fallback...")
+    driver.get(f"{HEYGEN_URL}/videos")
+    time.sleep(5)
+
     try:
-        print("    Attempting direct download via video URL...")
-        # Look for video elements or source URLs
         video_els = driver.find_elements(By.TAG_NAME, "video")
         for vel in video_els:
             src = vel.get_attribute("src")
             if src and src.startswith("http"):
-                print(f"    Found video URL, downloading...")
+                print(f"    Found video on /videos page, downloading...")
                 urllib.request.urlretrieve(src, str(output_path))
                 print(f"    Saved: {output_path}")
                 return
-
-        # Check for source elements inside video tags
-        source_els = driver.find_elements(By.CSS_SELECTOR, "video source")
-        for sel in source_els:
-            src = sel.get_attribute("src")
-            if src and src.startswith("http"):
-                print(f"    Found video source URL, downloading...")
-                urllib.request.urlretrieve(src, str(output_path))
-                print(f"    Saved: {output_path}")
-                return
-    except Exception as e:
-        print(f"    Direct download failed: {e}")
+    except Exception:
+        pass
 
     print(f"    Could not auto-download video '{title}'.")
     print(f"    Please download it manually from {HEYGEN_URL}/videos")
@@ -585,9 +498,7 @@ def main():
 
     print(f"Found {len(text_files)} text file(s) in '{folder}'")
     print(f"Videos will be saved to '{downloads_dir}'")
-    print(f"Orientation: Portrait (9:16)")
-    print(f"Avatar: None")
-    print(f"Mode: Generate (studio video)\n")
+    print(f"Mode: Video Agent (Generate)\n")
 
     driver = create_driver(headless=args.headless, download_dir=downloads_dir)
 
