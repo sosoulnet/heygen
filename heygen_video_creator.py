@@ -423,91 +423,42 @@ def download_video_from_heygen(driver, title, downloads_dir):
                 print(f"    Video detected on page! ({elapsed}s elapsed)")
                 time.sleep(3)
 
-                # Try to extract the video URL directly from the <video> element
+                # Look for a direct .mp4 URL from any <video> element on the page.
+                # The page has multiple video elements (main player + timeline
+                # thumbnails). Prefer files2.heygen.ai generated_videos URLs
+                # as these are the final output.
                 video_url = driver.execute_script("""
                     var videos = document.querySelectorAll('video');
+                    var mp4Urls = [];
                     for (var i = 0; i < videos.length; i++) {
-                        var v = videos[i];
-                        if (v.src && v.src.startsWith('http') &&
-                            v.src.indexOf('blob:') === -1) return v.src;
-                        var sources = v.querySelectorAll('source');
-                        for (var j = 0; j < sources.length; j++) {
-                            if (sources[j].src && sources[j].src.startsWith('http'))
-                                return sources[j].src;
+                        var src = videos[i].src || '';
+                        if (src.indexOf('.mp4') !== -1 && src.indexOf('blob:') === -1) {
+                            mp4Urls.push(src);
                         }
-                        if (v.currentSrc && v.currentSrc.startsWith('http') &&
-                            v.currentSrc.indexOf('blob:') === -1) return v.currentSrc;
                     }
-                    return null;
+                    // Prefer generated_videos URLs (final output) over tmp_resource
+                    for (var j = 0; j < mp4Urls.length; j++) {
+                        if (mp4Urls[j].indexOf('generated_videos') !== -1) return mp4Urls[j];
+                    }
+                    return mp4Urls.length > 0 ? mp4Urls[0] : null;
                 """)
                 if video_url:
-                    print(f"    Downloading video from URL...")
+                    print(f"    Found .mp4 URL, downloading...")
+                    # Use cookies from the browser session for the download
+                    cookies = driver.get_cookies()
+                    opener = urllib.request.build_opener()
+                    cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+                    opener.addheaders = [
+                        ("Cookie", cookie_str),
+                        ("Referer", HEYGEN_URL),
+                        ("User-Agent", driver.execute_script("return navigator.userAgent")),
+                    ]
+                    urllib.request.install_opener(opener)
                     urllib.request.urlretrieve(video_url, str(output_path))
                     print(f"    Saved: {output_path}")
                     return
 
-                # If video src is a blob URL, we need to click the download button.
-                # From the screenshot, download icon (↓) is at the top-right corner
-                # of the video detail page, next to a share icon.
-                # Strategy: find SVG icon buttons in the top-right area of the page.
-                # The download icon is typically the first of two small icon buttons.
-                print("    Video uses blob URL, clicking download button...")
-                download_clicked = driver.execute_script("""
-                    // Strategy 1: Look for download-related attributes
-                    var candidates = document.querySelectorAll(
-                        'a, button, [role="button"], div.tw-cursor-pointer');
-                    for (var i = 0; i < candidates.length; i++) {
-                        var el = candidates[i];
-                        if (!el.offsetParent) continue;
-                        var aria = (el.getAttribute('aria-label') || '').toLowerCase();
-                        var title = (el.getAttribute('title') || '').toLowerCase();
-                        var cls = (el.className + '').toLowerCase();
-                        var href = (el.getAttribute('href') || '');
-                        var dl = el.getAttribute('download');
-                        if (aria.indexOf('download') !== -1 ||
-                            title.indexOf('download') !== -1 ||
-                            cls.indexOf('download') !== -1 ||
-                            dl !== null ||
-                            (href && href.indexOf('.mp4') !== -1)) {
-                            el.click();
-                            return 'attribute';
-                        }
-                    }
-
-                    // Strategy 2: Find SVG icons in the top-right area of the page
-                    // From the screenshot: two icon buttons at top-right,
-                    // download (↓) is the first one, share is the second
-                    var topRightIcons = [];
-                    var svgs = document.querySelectorAll('svg');
-                    for (var j = 0; j < svgs.length; j++) {
-                        var svg = svgs[j];
-                        var parent = svg.closest(
-                            'a, button, [role="button"], div.tw-cursor-pointer');
-                        if (!parent || !parent.offsetParent) continue;
-                        var rect = parent.getBoundingClientRect();
-                        // Top area (y < 80) and right side (x > 70% of viewport)
-                        if (rect.top < 80 && rect.left > window.innerWidth * 0.7 &&
-                            rect.width < 60 && rect.height < 60) {
-                            topRightIcons.push({el: parent, x: rect.left});
-                        }
-                    }
-                    // Sort by x position, download icon should be leftmost of the pair
-                    topRightIcons.sort(function(a, b) { return a.x - b.x; });
-                    if (topRightIcons.length > 0) {
-                        topRightIcons[0].el.click();
-                        return 'position';
-                    }
-
-                    return null;
-                """)
-
-                if download_clicked:
-                    print(f"    Download button clicked (via {download_clicked})!")
-                    time.sleep(5)
-                    wait_for_download(downloads_dir, title)
-                    return
-
-                print("    Could not find download button.")
+                print("    No .mp4 URL found in video elements.")
                 print("    Please download manually.")
                 break
 
