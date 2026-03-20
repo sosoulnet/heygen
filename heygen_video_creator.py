@@ -207,6 +207,7 @@ def create_video_from_text(driver, text, title, downloads_dir):
     time.sleep(2)
 
     # DEBUG: Dump the toolbar / input area HTML so we can inspect element structure
+    downloads_dir.mkdir(parents=True, exist_ok=True)
     debug_html_path = downloads_dir / "debug_toolbar_html.txt"
     try:
         toolbar_html = driver.execute_script("""
