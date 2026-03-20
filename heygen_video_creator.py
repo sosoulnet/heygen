@@ -151,10 +151,12 @@ def create_video_from_text(driver, text, title, downloads_dir):
     """
     print(f"\n  Creating video: '{title}'")
 
-    # Step 1: Navigate to the Video Agent page
+    # Step 1: Navigate to the Video Agent page and wait for user to be ready
     print("  Step 1: Opening Video Agent...")
     driver.get(f"{HEYGEN_URL}/video-agent")
-    time.sleep(5)
+    time.sleep(3)
+    print("  Page loaded. Please log in if needed and make sure you are on the Video Agent page.")
+    input("  Press Enter when you are ready to continue...")
 
     # Step 2: Switch to "Generate" mode (default is "Chat")
     # The "Chat" toggle is a div with class tw-h-8 tw-cursor-pointer in the
@@ -588,10 +590,6 @@ def main():
     driver = create_driver(headless=args.headless, download_dir=downloads_dir)
 
     try:
-        # Login first
-        print("Step 1: Logging in to HeyGen...")
-        login(driver)
-
         results = {"success": 0, "failed": 0}
 
         for i, txt_file in enumerate(text_files, 1):
