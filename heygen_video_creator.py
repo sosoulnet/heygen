@@ -105,17 +105,28 @@ def wait_for_visible(driver, by, value, timeout=MAX_WAIT, description="element")
     )
 
 
-def login(driver):
-    """Navigate to HeyGen and handle login.
+def login(driver, email=None, password=None):
+    """Navigate to HeyGen and ensure the user is logged in.
 
-    If HEYGEN_EMAIL and HEYGEN_PASSWORD are set, auto-fills them.
-    Otherwise, waits for the user to log in manually.
+    First checks if the user is already logged in. If a login page appears,
+    auto-fills credentials (if provided) or waits 30 seconds for the user
+    to log in manually.
     """
     driver.get(HEYGEN_URL)
     print("  Navigated to HeyGen...")
+    time.sleep(3)
 
-    email = os.environ.get("HEYGEN_EMAIL")
-    password = os.environ.get("HEYGEN_PASSWORD")
+    # Check if already logged in (no login/signup in the URL)
+    if "/login" not in driver.current_url and "/signup" not in driver.current_url:
+        print("  Already logged in!")
+        return
+
+    print("  Login page detected.")
+
+    if not email:
+        email = os.environ.get("HEYGEN_EMAIL")
+    if not password:
+        password = os.environ.get("HEYGEN_PASSWORD")
 
     if email and password:
         print("  Auto-filling credentials...")
@@ -140,8 +151,6 @@ def login(driver):
             # Try clicking a login/sign-in button
             for selector in [
                 'button[type="submit"]',
-                'button:has-text("Log in")',
-                'button:has-text("Sign in")',
                 '//button[contains(text(), "Log")]',
                 '//button[contains(text(), "Sign")]',
             ]:
@@ -158,12 +167,20 @@ def login(driver):
         except Exception as e:
             print(f"  Auto-login failed ({e}), please log in manually.")
 
-    # Wait until we're past the login page (look for the dashboard/studio)
-    print("  Waiting for login to complete (log in manually if needed)...")
-    WebDriverWait(driver, 120).until(
-        lambda d: "/login" not in d.current_url and "/signup" not in d.current_url
-    )
-    print("  Logged in successfully!")
+    # Wait up to 30 seconds for the user to finish logging in
+    print("  Waiting up to 30 seconds for login to complete...")
+    try:
+        WebDriverWait(driver, 30).until(
+            lambda d: "/login" not in d.current_url and "/signup" not in d.current_url
+        )
+        print("  Logged in successfully!")
+    except Exception:
+        print("  WARNING: Still on login page after 30 seconds.")
+        print("  Please log in manually. Waiting another 90 seconds...")
+        WebDriverWait(driver, 90).until(
+            lambda d: "/login" not in d.current_url and "/signup" not in d.current_url
+        )
+        print("  Logged in successfully!")
     time.sleep(3)
 
 

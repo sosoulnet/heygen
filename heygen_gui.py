@@ -201,14 +201,6 @@ class HeyGenGUI:
             messagebox.showerror("Error", f"No .txt files found in:\n{folder}")
             return
 
-        # Set env vars so heygen_video_creator picks them up
-        email = self.email_var.get().strip()
-        password = self.password_var.get().strip()
-        if email:
-            os.environ["HEYGEN_EMAIL"] = email
-        if password:
-            os.environ["HEYGEN_PASSWORD"] = password
-
         self._set_running(True)
         self._log("=" * 50)
         self._log("Starting HeyGen Video Creator...")
@@ -272,7 +264,9 @@ class HeyGenGUI:
             self.driver = driver
 
             self._log("Logging in to HeyGen...")
-            hvc.login(driver)
+            email = self.email_var.get().strip() or None
+            password = self.password_var.get().strip() or None
+            hvc.login(driver, email=email, password=password)
 
             results = {"success": 0, "failed": 0}
             total = len(txt_files)
