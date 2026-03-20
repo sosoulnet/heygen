@@ -252,6 +252,85 @@ def create_video_from_text(driver, text, title, downloads_dir):
 
     time.sleep(2)
 
+    # DEBUG: Dump the toolbar / input area HTML so we can inspect element structure
+    debug_html_path = downloads_dir / "debug_toolbar_html.txt"
+    try:
+        toolbar_html = driver.execute_script("""
+            // Capture a broad area around the input/toolbar
+            var dumps = [];
+
+            // 1. Get the full page HTML of interactive areas
+            // Look for the textarea and its parent containers
+            var textareas = document.querySelectorAll('textarea');
+            textareas.forEach(function(ta, i) {
+                // Go up several levels to capture the toolbar context
+                var parent = ta;
+                for (var j = 0; j < 8; j++) {
+                    if (parent.parentElement) parent = parent.parentElement;
+                }
+                dumps.push('=== TEXTAREA #' + i + ' ANCESTOR (8 levels up) ===');
+                dumps.push(parent.outerHTML);
+            });
+
+            // 2. Find all elements containing "Auto" text
+            var autoEls = [];
+            var walker = document.createTreeWalker(
+                document.body, NodeFilter.SHOW_TEXT, null, false);
+            while (walker.nextNode()) {
+                if (walker.currentNode.textContent.trim() === 'Auto') {
+                    var el = walker.currentNode.parentElement;
+                    dumps.push('=== ELEMENT WITH "Auto" TEXT ===');
+                    // Go up 4 levels
+                    var ancestor = el;
+                    for (var k = 0; k < 4; k++) {
+                        if (ancestor.parentElement) ancestor = ancestor.parentElement;
+                    }
+                    dumps.push('Tag: ' + el.tagName + ', Class: ' + el.className);
+                    dumps.push('Ancestor HTML: ' + ancestor.outerHTML.substring(0, 2000));
+                    dumps.push('---');
+                }
+            }
+
+            // 3. Find all elements containing "Portrait" or "Landscape" text
+            var walker2 = document.createTreeWalker(
+                document.body, NodeFilter.SHOW_TEXT, null, false);
+            while (walker2.nextNode()) {
+                var txt = walker2.currentNode.textContent.trim();
+                if (txt === 'Portrait' || txt === 'Landscape') {
+                    var el2 = walker2.currentNode.parentElement;
+                    dumps.push('=== ELEMENT WITH "' + txt + '" TEXT ===');
+                    var ancestor2 = el2;
+                    for (var m = 0; m < 3; m++) {
+                        if (ancestor2.parentElement) ancestor2 = ancestor2.parentElement;
+                    }
+                    dumps.push('Tag: ' + el2.tagName + ', Class: ' + el2.className);
+                    dumps.push('Ancestor HTML: ' + ancestor2.outerHTML.substring(0, 2000));
+                    dumps.push('---');
+                }
+            }
+
+            // 4. Find all buttons/clickable elements in the page
+            var buttons = document.querySelectorAll('button, [role="button"], a[href]');
+            dumps.push('=== ALL BUTTONS/CLICKABLE ELEMENTS ===');
+            buttons.forEach(function(btn, idx) {
+                if (btn.offsetParent !== null) {  // visible only
+                    var rect = btn.getBoundingClientRect();
+                    dumps.push('BTN#' + idx + ' tag=' + btn.tagName +
+                        ' class="' + (btn.className || '').substring(0, 100) + '"' +
+                        ' aria-label="' + (btn.getAttribute('aria-label') || '') + '"' +
+                        ' text="' + btn.textContent.trim().substring(0, 50) + '"' +
+                        ' pos=(' + Math.round(rect.x) + ',' + Math.round(rect.y) +
+                        ') size=' + Math.round(rect.width) + 'x' + Math.round(rect.height));
+                }
+            });
+
+            return dumps.join('\\n');
+        """)
+        debug_html_path.write_text(toolbar_html)
+        print(f"  DEBUG: Toolbar HTML saved to {debug_html_path}")
+    except Exception as e:
+        print(f"  DEBUG: Could not dump toolbar HTML: {e}")
+
     # Step 3: Set aspect ratio to Portrait
     # The toolbar has two "Auto" dropdowns. The second one (aspect ratio icon)
     # controls orientation with options: Auto, Portrait, Landscape.
@@ -500,6 +579,61 @@ def download_video_from_heygen(driver, title, downloads_dir):
             has_video = any(vel.is_displayed() for vel in video_els)
 
             if has_video:
+                # DEBUG: Dump the video page HTML for download button analysis
+                debug_video_path = downloads_dir / "debug_video_page.txt"
+                try:
+                    video_page_html = driver.execute_script("""
+                        var dumps = [];
+                        // All buttons/links on the page
+                        var els = document.querySelectorAll('button, a, [role="button"]');
+                        dumps.push('=== ALL CLICKABLE ELEMENTS ON VIDEO PAGE ===');
+                        els.forEach(function(el, idx) {
+                            if (el.offsetParent !== null) {
+                                var rect = el.getBoundingClientRect();
+                                dumps.push('EL#' + idx + ' tag=' + el.tagName +
+                                    ' class="' + (el.className || '').substring(0, 100) + '"' +
+                                    ' aria-label="' + (el.getAttribute('aria-label') || '') + '"' +
+                                    ' title="' + (el.getAttribute('title') || '') + '"' +
+                                    ' href="' + (el.getAttribute('href') || '') + '"' +
+                                    ' download="' + (el.getAttribute('download') || '') + '"' +
+                                    ' text="' + el.textContent.trim().substring(0, 80) + '"' +
+                                    ' pos=(' + Math.round(rect.x) + ',' + Math.round(rect.y) +
+                                    ') size=' + Math.round(rect.width) + 'x' + Math.round(rect.height));
+                            }
+                        });
+                        // Video elements
+                        var videos = document.querySelectorAll('video');
+                        dumps.push('\\n=== VIDEO ELEMENTS ===');
+                        videos.forEach(function(v, idx) {
+                            dumps.push('VIDEO#' + idx +
+                                ' src="' + (v.src || '') + '"' +
+                                ' currentSrc="' + (v.currentSrc || '') + '"');
+                            var sources = v.querySelectorAll('source');
+                            sources.forEach(function(s, j) {
+                                dumps.push('  SOURCE#' + j + ' src="' + (s.src || '') + '"');
+                            });
+                        });
+                        // SVG icons - find their parent clickable elements
+                        var svgs = document.querySelectorAll('svg');
+                        dumps.push('\\n=== SVG ICONS WITH CLICKABLE PARENTS ===');
+                        svgs.forEach(function(svg, idx) {
+                            var parent = svg.closest('a, button, [role="button"]');
+                            if (parent && parent.offsetParent !== null) {
+                                var rect = parent.getBoundingClientRect();
+                                dumps.push('SVG#' + idx + ' parent_tag=' + parent.tagName +
+                                    ' class="' + (parent.className || '').substring(0, 100) + '"' +
+                                    ' aria-label="' + (parent.getAttribute('aria-label') || '') + '"' +
+                                    ' pos=(' + Math.round(rect.x) + ',' + Math.round(rect.y) +
+                                    ') size=' + Math.round(rect.width) + 'x' + Math.round(rect.height));
+                            }
+                        });
+                        return dumps.join('\\n');
+                    """)
+                    debug_video_path.write_text(video_page_html)
+                    print(f"    DEBUG: Video page HTML saved to {debug_video_path}")
+                except Exception as e:
+                    print(f"    DEBUG: Could not dump video page: {e}")
+
                 print(f"    Video detected on page! ({elapsed}s elapsed)")
 
                 # First try: click the download icon button (top-right corner)
