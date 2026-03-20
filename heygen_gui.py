@@ -9,6 +9,7 @@ Usage:
     python heygen_gui.py
 """
 
+import json
 import os
 import sys
 import threading
@@ -33,6 +34,7 @@ class HeyGenGUI:
 
         self._build_ui()
         self._load_saved_settings()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self):
         # Main container with padding
@@ -163,10 +165,38 @@ class HeyGenGUI:
         else:
             self.file_count_label.config(text="No folder selected.", foreground="gray")
 
+    @property
+    def _settings_path(self):
+        return Path(__file__).parent / "heygen_settings.json"
+
     def _load_saved_settings(self):
-        self.email_var.set(os.environ.get("HEYGEN_EMAIL", ""))
-        self.password_var.set(os.environ.get("HEYGEN_PASSWORD", ""))
-        self.headless_var.set(os.environ.get("HEYGEN_HEADLESS") == "1")
+        """Load settings from JSON file, falling back to env vars."""
+        try:
+            data = json.loads(self._settings_path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+
+        self.email_var.set(data.get("email", os.environ.get("HEYGEN_EMAIL", "")))
+        self.password_var.set(data.get("password", os.environ.get("HEYGEN_PASSWORD", "")))
+        self.folder_var.set(data.get("folder", ""))
+        self.orientation_var.set(data.get("orientation", "portrait"))
+        self.avatar_var.set(data.get("avatar", "none"))
+        self.headless_var.set(data.get("headless", False))
+
+    def _save_settings(self):
+        """Persist current GUI settings to a JSON file."""
+        data = {
+            "email": self.email_var.get().strip(),
+            "password": self.password_var.get().strip(),
+            "folder": self.folder_var.get().strip(),
+            "orientation": self.orientation_var.get(),
+            "avatar": self.avatar_var.get(),
+            "headless": self.headless_var.get(),
+        }
+        try:
+            self._settings_path.write_text(json.dumps(data, indent=2))
+        except Exception:
+            pass  # non-critical
 
     def _log(self, msg):
         def _append():
@@ -175,6 +205,16 @@ class HeyGenGUI:
             self.log_text.see(tk.END)
             self.log_text.config(state=tk.DISABLED)
         self.root.after(0, _append)
+
+    def _on_close(self):
+        """Save settings and close the window."""
+        self._save_settings()
+        if self.driver:
+            try:
+                self.driver.quit()
+            except Exception:
+                pass
+        self.root.destroy()
 
     def _set_progress(self, current, total):
         def _update():
@@ -191,6 +231,7 @@ class HeyGenGUI:
         self.root.after(0, _update)
 
     def _start(self):
+        self._save_settings()
         folder = self.folder_var.get().strip()
         if not folder or not Path(folder).is_dir():
             messagebox.showerror("Error", "Please select a valid folder containing .txt files.")
