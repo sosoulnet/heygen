@@ -19,8 +19,6 @@ Requirements:
     pip install -r requirements.txt
 
 Environment variables (optional, in .env):
-    HEYGEN_EMAIL    - Auto-fill login email
-    HEYGEN_PASSWORD - Auto-fill login password
     HEYGEN_HEADLESS - Set to "1" for headless mode (default: visible browser)
 """
 
@@ -108,9 +106,8 @@ def wait_for_visible(driver, by, value, timeout=MAX_WAIT, description="element")
 def login(driver, email=None, password=None):
     """Navigate to HeyGen and ensure the user is logged in.
 
-    First checks if the user is already logged in. If a login page appears,
-    auto-fills credentials (if provided) or waits 30 seconds for the user
-    to log in manually.
+    If a login/register page is detected, pauses and waits for the user
+    to complete login manually. Never auto-fills credentials.
     """
     driver.get(HEYGEN_URL)
     print("  Navigated to HeyGen...")
@@ -121,65 +118,22 @@ def login(driver, email=None, password=None):
         print("  Already logged in!")
         return
 
-    print("  Login page detected.")
+    print("  Login/register page detected.")
+    print("  Please log in manually in the browser window.")
+    input("  Press Enter here once you have logged in successfully...")
 
-    if not email:
-        email = os.environ.get("HEYGEN_EMAIL")
-    if not password:
-        password = os.environ.get("HEYGEN_PASSWORD")
-
-    if email and password:
-        print("  Auto-filling credentials...")
+    # Verify login succeeded
+    time.sleep(2)
+    if "/login" in driver.current_url or "/signup" in driver.current_url:
+        print("  Still on login page. Waiting for redirect...")
         try:
-            email_input = wait_for_element(
-                driver, By.CSS_SELECTOR,
-                'input[type="email"], input[name="email"], input[placeholder*="email" i]',
-                timeout=15, description="email field"
+            WebDriverWait(driver, 120).until(
+                lambda d: "/login" not in d.current_url and "/signup" not in d.current_url
             )
-            email_input.clear()
-            email_input.send_keys(email)
-            time.sleep(0.5)
-
-            pass_input = driver.find_element(
-                By.CSS_SELECTOR,
-                'input[type="password"], input[name="password"]'
-            )
-            pass_input.clear()
-            pass_input.send_keys(password)
-            time.sleep(0.5)
-
-            # Try clicking a login/sign-in button
-            for selector in [
-                'button[type="submit"]',
-                '//button[contains(text(), "Log")]',
-                '//button[contains(text(), "Sign")]',
-            ]:
-                try:
-                    if selector.startswith("//"):
-                        btn = driver.find_element(By.XPATH, selector)
-                    else:
-                        btn = driver.find_element(By.CSS_SELECTOR, selector)
-                    btn.click()
-                    break
-                except Exception:
-                    continue
-
-        except Exception as e:
-            print(f"  Auto-login failed ({e}), please log in manually.")
-
-    # Wait up to 30 seconds for the user to finish logging in
-    print("  Waiting up to 30 seconds for login to complete...")
-    try:
-        WebDriverWait(driver, 30).until(
-            lambda d: "/login" not in d.current_url and "/signup" not in d.current_url
-        )
-        print("  Logged in successfully!")
-    except Exception:
-        print("  WARNING: Still on login page after 30 seconds.")
-        print("  Please log in manually. Waiting another 90 seconds...")
-        WebDriverWait(driver, 90).until(
-            lambda d: "/login" not in d.current_url and "/signup" not in d.current_url
-        )
+            print("  Logged in successfully!")
+        except Exception:
+            print("  WARNING: Still on login page. Continuing anyway...")
+    else:
         print("  Logged in successfully!")
     time.sleep(3)
 
