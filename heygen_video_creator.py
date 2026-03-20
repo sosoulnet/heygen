@@ -258,63 +258,85 @@ def create_video_from_text(driver, text, title, downloads_dir):
     print("  Step 3: Setting aspect ratio to Portrait...")
     portrait_selected = False
     try:
-        # Find all elements containing "Auto" text that look like dropdown triggers
-        # The aspect ratio dropdown is the second "Auto" button in the toolbar
-        auto_buttons = []
-        for sel in [
-            '//button[.//text()="Auto"]',
-            '//div[contains(@class,"dropdown") or contains(@class,"select")]//*[text()="Auto"]/ancestor::button',
-            '//*[text()="Auto"]/ancestor::*[self::button or @role="button"]',
-        ]:
+        # Use JavaScript to find all clickable elements containing "Auto" text
+        # in the toolbar area. The aspect ratio dropdown is the second one.
+        auto_buttons = driver.execute_script("""
+            var results = [];
+            // Find all elements that contain exactly "Auto" text and are clickable
+            var allEls = document.querySelectorAll('button, [role="button"], [class*="dropdown"], [class*="trigger"], [class*="select"]');
+            allEls.forEach(function(el) {
+                if (el.offsetParent !== null && el.textContent.trim().indexOf('Auto') !== -1) {
+                    // Only include elements whose direct text (not deep children) contains Auto
+                    var directText = '';
+                    el.childNodes.forEach(function(child) {
+                        if (child.nodeType === 3) directText += child.textContent;
+                    });
+                    // Also check span/div children for "Auto"
+                    var spans = el.querySelectorAll('span, div, p');
+                    var hasAutoChild = false;
+                    spans.forEach(function(s) {
+                        if (s.textContent.trim() === 'Auto') hasAutoChild = true;
+                    });
+                    if (directText.trim() === 'Auto' || hasAutoChild || el.textContent.trim() === 'Auto') {
+                        results.push(el);
+                    }
+                }
+            });
+            return results;
+        """)
+        print(f"    Found {len(auto_buttons)} 'Auto' buttons in toolbar")
+
+        # Try each Auto button - click it, check if Portrait appears in dropdown
+        for i, btn in enumerate(auto_buttons):
             try:
-                found = driver.find_elements(By.XPATH, sel)
-                for btn in found:
-                    if btn.is_displayed() and btn not in auto_buttons:
-                        auto_buttons.append(btn)
-            except Exception:
+                driver.execute_script("arguments[0].click();", btn)
+                time.sleep(1.5)
+
+                # Look for "Portrait" in the now-visible dropdown
+                portrait_els = driver.find_elements(By.XPATH,
+                    '//*[text()="Portrait" or text()=" Portrait"]')
+                for p_el in portrait_els:
+                    if p_el.is_displayed():
+                        driver.execute_script("arguments[0].click();", p_el)
+                        portrait_selected = True
+                        print(f"    Portrait mode selected (button #{i+1}).")
+                        break
+                if portrait_selected:
+                    break
+                else:
+                    # Close this dropdown by clicking elsewhere, try next button
+                    driver.execute_script(
+                        "document.body.click();")
+                    time.sleep(0.5)
+            except Exception as e:
+                print(f"    Button #{i+1} error: {e}")
                 continue
 
-        # The second "Auto" button is the aspect ratio dropdown
-        if len(auto_buttons) >= 2:
-            auto_buttons[1].click()
-            time.sleep(1)
-            # Click "Portrait" from the dropdown
-            for portrait_sel in [
-                '//*[text()="Portrait"]',
-                '//div[text()="Portrait"]',
-                '//span[text()="Portrait"]',
-            ]:
+        if not portrait_selected:
+            # Fallback: try clicking all visible elements with "Auto" text
+            # using a broader search
+            all_auto = driver.find_elements(By.XPATH,
+                '//*[normalize-space(text())="Auto"]')
+            print(f"    Fallback: found {len(all_auto)} elements with 'Auto' text")
+            for i, el in enumerate(all_auto):
                 try:
-                    p_els = driver.find_elements(By.XPATH, portrait_sel)
-                    for p_el in p_els:
+                    if not el.is_displayed():
+                        continue
+                    driver.execute_script("arguments[0].click();", el)
+                    time.sleep(1.5)
+                    portrait_els = driver.find_elements(By.XPATH,
+                        '//*[normalize-space(text())="Portrait"]')
+                    for p_el in portrait_els:
                         if p_el.is_displayed():
-                            p_el.click()
+                            driver.execute_script("arguments[0].click();", p_el)
                             portrait_selected = True
-                            print("    Portrait mode selected.")
+                            print(f"    Portrait mode selected (fallback #{i+1}).")
                             break
                     if portrait_selected:
                         break
-                except Exception:
-                    continue
-        elif len(auto_buttons) == 1:
-            # Maybe there's only one "Auto" and it's the aspect ratio one
-            auto_buttons[0].click()
-            time.sleep(1)
-            for portrait_sel in [
-                '//*[text()="Portrait"]',
-                '//div[text()="Portrait"]',
-                '//span[text()="Portrait"]',
-            ]:
-                try:
-                    p_els = driver.find_elements(By.XPATH, portrait_sel)
-                    for p_el in p_els:
-                        if p_el.is_displayed():
-                            p_el.click()
-                            portrait_selected = True
-                            print("    Portrait mode selected.")
-                            break
-                    if portrait_selected:
-                        break
+                    else:
+                        driver.execute_script("document.body.click();")
+                        time.sleep(0.5)
                 except Exception:
                     continue
     except Exception as e:
@@ -472,49 +494,166 @@ def download_video_from_heygen(driver, title, downloads_dir):
         elapsed = int(time.time() - start_time)
 
         try:
-            # Check if a video element appeared on the page
+            # Check if video generation is complete by looking for the video player
+            # or a download icon button in the top-right corner of the video page
             video_els = driver.find_elements(By.TAG_NAME, "video")
-            for vel in video_els:
-                src = vel.get_attribute("src")
-                if src and src.startswith("http"):
-                    print(f"    Video ready! Downloading...")
-                    urllib.request.urlretrieve(src, str(output_path))
+            has_video = any(vel.is_displayed() for vel in video_els)
+
+            if has_video:
+                print(f"    Video detected on page! ({elapsed}s elapsed)")
+
+                # First try: click the download icon button (top-right corner)
+                # It's typically an SVG icon button with a download arrow
+                download_clicked = False
+                for selector in [
+                    '[aria-label*="download" i]',
+                    '[aria-label*="Download" i]',
+                    '[data-testid*="download" i]',
+                    'a[download]',
+                    # SVG download icon buttons - look for path with download arrow shape
+                    '//button[.//*[local-name()="svg"]]',
+                    '//a[.//*[local-name()="svg"]]',
+                    '//button[contains(@class, "download")]',
+                    '//a[contains(@class, "download")]',
+                    '//button[contains(text(), "Download")]',
+                    '//a[contains(text(), "Download")]',
+                ]:
+                    try:
+                        if selector.startswith("//"):
+                            els = driver.find_elements(By.XPATH, selector)
+                        else:
+                            els = driver.find_elements(By.CSS_SELECTOR, selector)
+                        for el in els:
+                            if el.is_displayed() and el.is_enabled():
+                                # Check if it looks like a download button
+                                # (small icon button in top area of page)
+                                aria = (el.get_attribute("aria-label") or "").lower()
+                                cls = (el.get_attribute("class") or "").lower()
+                                href = (el.get_attribute("href") or "").lower()
+                                title_attr = (el.get_attribute("title") or "").lower()
+                                if any(kw in s for kw in ["download"] for s in [aria, cls, href, title_attr]):
+                                    driver.execute_script("arguments[0].click();", el)
+                                    download_clicked = True
+                                    print("    Download button clicked!")
+                                    time.sleep(5)
+                                    break
+                        if download_clicked:
+                            break
+                    except Exception:
+                        continue
+
+                if download_clicked:
+                    wait_for_download(downloads_dir, title)
+                    return
+
+                # Second try: use JavaScript to find the download icon by checking
+                # all small buttons/links near the top of the page
+                print("    Trying JS-based download button search...")
+                download_clicked = driver.execute_script("""
+                    // Look for links/buttons with download-related attributes or
+                    // SVG icons that look like download arrows
+                    var candidates = document.querySelectorAll('a, button');
+                    for (var i = 0; i < candidates.length; i++) {
+                        var el = candidates[i];
+                        if (!el.offsetParent) continue;
+                        var aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                        var title = (el.getAttribute('title') || '').toLowerCase();
+                        var cls = (el.className || '').toLowerCase();
+                        var href = (el.getAttribute('href') || '').toLowerCase();
+                        var download = el.getAttribute('download');
+                        if (aria.indexOf('download') !== -1 ||
+                            title.indexOf('download') !== -1 ||
+                            cls.indexOf('download') !== -1 ||
+                            download !== null) {
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                """)
+                if download_clicked:
+                    print("    Download button clicked via JS!")
+                    time.sleep(5)
+                    wait_for_download(downloads_dir, title)
+                    return
+
+                # Third try: get video src and download directly
+                for vel in video_els:
+                    src = vel.get_attribute("src")
+                    if src and src.startswith("http"):
+                        print(f"    Downloading video from src URL...")
+                        urllib.request.urlretrieve(src, str(output_path))
+                        print(f"    Saved: {output_path}")
+                        return
+                source_els = driver.find_elements(By.CSS_SELECTOR, "video source")
+                for sel_el in source_els:
+                    src = sel_el.get_attribute("src")
+                    if src and src.startswith("http"):
+                        print(f"    Downloading video from source URL...")
+                        urllib.request.urlretrieve(src, str(output_path))
+                        print(f"    Saved: {output_path}")
+                        return
+
+                # Fourth try: use browser's built-in download via the download icon
+                # From the screenshot, the icon is at top-right, likely an <a> tag
+                # Try clicking any icon-like element near the title area
+                print("    Trying to find download icon near video title...")
+                download_clicked = driver.execute_script("""
+                    // The download icon is at the top-right of the video detail page
+                    // Look for clickable SVG icons
+                    var svgs = document.querySelectorAll('svg');
+                    for (var i = 0; i < svgs.length; i++) {
+                        var svg = svgs[i];
+                        if (!svg.offsetParent) continue;
+                        var parent = svg.closest('a, button, [role="button"]');
+                        if (!parent) continue;
+                        // Check position - should be in upper right area
+                        var rect = parent.getBoundingClientRect();
+                        if (rect.top < 100 && rect.right > window.innerWidth - 200) {
+                            // This is likely a top-right icon button
+                            // Check if it's the first one (download) not the second (share)
+                            parent.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                """)
+                if download_clicked:
+                    print("    Top-right icon clicked (likely download)!")
+                    time.sleep(5)
+                    wait_for_download(downloads_dir, title)
+                    return
+
+                print("    WARNING: Video found but could not trigger download.")
+                print("    Attempting to extract video URL from network...")
+
+                # Last resort: get all video URLs from page via JS
+                video_url = driver.execute_script("""
+                    var videos = document.querySelectorAll('video');
+                    for (var i = 0; i < videos.length; i++) {
+                        var v = videos[i];
+                        if (v.src && v.src.startsWith('http')) return v.src;
+                        var sources = v.querySelectorAll('source');
+                        for (var j = 0; j < sources.length; j++) {
+                            if (sources[j].src && sources[j].src.startsWith('http'))
+                                return sources[j].src;
+                        }
+                        // Try currentSrc
+                        if (v.currentSrc && v.currentSrc.startsWith('http'))
+                            return v.currentSrc;
+                    }
+                    return null;
+                """)
+                if video_url:
+                    print(f"    Downloading from extracted URL...")
+                    urllib.request.urlretrieve(video_url, str(output_path))
                     print(f"    Saved: {output_path}")
                     return
 
-            # Check for source elements inside video tags
-            source_els = driver.find_elements(By.CSS_SELECTOR, "video source")
-            for sel_el in source_els:
-                src = sel_el.get_attribute("src")
-                if src and src.startswith("http"):
-                    print(f"    Video ready! Downloading...")
-                    urllib.request.urlretrieve(src, str(output_path))
-                    print(f"    Saved: {output_path}")
-                    return
+                print("    Could not extract video URL. Please download manually.")
+                break
 
-            # Look for a download button on the page
-            for selector in [
-                '//button[contains(text(), "Download")]',
-                '//a[contains(text(), "Download")]',
-                '[aria-label*="download" i]',
-                '[data-testid*="download" i]',
-            ]:
-                try:
-                    if selector.startswith("//"):
-                        els = driver.find_elements(By.XPATH, selector)
-                    else:
-                        els = driver.find_elements(By.CSS_SELECTOR, selector)
-                    for el in els:
-                        if el.is_displayed() and el.is_enabled():
-                            el.click()
-                            time.sleep(5)
-                            print("    Download initiated!")
-                            wait_for_download(downloads_dir, title)
-                            return
-                except Exception:
-                    continue
-
-            # Still waiting
+            # Still waiting - no video element yet
             page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
             if any(w in page_text for w in ["generating", "processing", "creating", "loading"]):
                 print(f"    Still generating... ({elapsed}s elapsed)")
@@ -531,9 +670,31 @@ def download_video_from_heygen(driver, title, downloads_dir):
     time.sleep(5)
 
     try:
+        # Look for download button on /videos page too
+        for selector in [
+            '[aria-label*="download" i]',
+            'a[download]',
+            '//button[contains(text(), "Download")]',
+            '//a[contains(text(), "Download")]',
+        ]:
+            try:
+                if selector.startswith("//"):
+                    els = driver.find_elements(By.XPATH, selector)
+                else:
+                    els = driver.find_elements(By.CSS_SELECTOR, selector)
+                for el in els:
+                    if el.is_displayed() and el.is_enabled():
+                        driver.execute_script("arguments[0].click();", el)
+                        time.sleep(5)
+                        print("    Download initiated from /videos page!")
+                        wait_for_download(downloads_dir, title)
+                        return
+            except Exception:
+                continue
+
         video_els = driver.find_elements(By.TAG_NAME, "video")
         for vel in video_els:
-            src = vel.get_attribute("src")
+            src = vel.get_attribute("src") or vel.get_attribute("currentSrc")
             if src and src.startswith("http"):
                 print(f"    Found video on /videos page, downloading...")
                 urllib.request.urlretrieve(src, str(output_path))
