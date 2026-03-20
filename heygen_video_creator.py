@@ -275,21 +275,54 @@ def create_video_from_text(driver, text, title, downloads_dir):
                     time.sleep(0.2)
                     el.send_keys(Keys.DELETE)
                     time.sleep(0.2)
-                    # Type text using JS for reliability with long text
+                    # Use React-compatible value setter + clipboard paste
+                    # to ensure the full multi-line text is recognized
                     if el.tag_name == "textarea":
-                        driver.execute_script(
-                            "arguments[0].value = arguments[1]; "
-                            "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));",
-                            el, text
-                        )
+                        driver.execute_script("""
+                            var el = arguments[0];
+                            var text = arguments[1];
+                            // Use React's native input value setter to bypass
+                            // React's controlled component state
+                            var nativeSetter = Object.getOwnPropertyDescriptor(
+                                window.HTMLTextAreaElement.prototype, 'value'
+                            ).set;
+                            nativeSetter.call(el, text);
+                            el.dispatchEvent(new Event('input', {bubbles: true}));
+                            el.dispatchEvent(new Event('change', {bubbles: true}));
+                        """, el, text)
                     else:
                         driver.execute_script(
                             "arguments[0].innerText = arguments[1]; "
-                            "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));",
+                            "arguments[0].dispatchEvent(new Event('input', {bubbles: true})); "
+                            "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));",
                             el, text
                         )
-                    script_entered = True
-                    print(f"    Script entered ({len(text)} chars).")
+                    time.sleep(0.5)
+                    # Verify the text was set correctly
+                    actual = driver.execute_script(
+                        "return arguments[0].value || arguments[0].innerText;", el
+                    )
+                    if actual and len(actual.strip()) > 20:
+                        script_entered = True
+                        print(f"    Script entered ({len(text)} chars, verified {len(actual)} chars in field).")
+                    else:
+                        # Fallback: use clipboard paste via JS
+                        print("    React setter didn't stick, trying clipboard paste...")
+                        el.click()
+                        time.sleep(0.3)
+                        el.send_keys(Keys.CONTROL + "a")
+                        time.sleep(0.1)
+                        el.send_keys(Keys.DELETE)
+                        time.sleep(0.1)
+                        # Copy text to clipboard via JS and paste
+                        driver.execute_script(
+                            "navigator.clipboard.writeText(arguments[0]);", text
+                        )
+                        time.sleep(0.3)
+                        el.send_keys(Keys.CONTROL + "v")
+                        time.sleep(0.5)
+                        script_entered = True
+                        print(f"    Script pasted via clipboard ({len(text)} chars).")
                     break
             if script_entered:
                 break
