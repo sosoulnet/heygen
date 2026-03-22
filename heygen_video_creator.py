@@ -407,63 +407,64 @@ def download_video_from_heygen(driver, title, downloads_dir):
     downloads_dir.mkdir(parents=True, exist_ok=True)
     output_path = downloads_dir / f"{title}.mp4"
 
+    # Snapshot existing generated_videos URLs so we can detect the NEW one
+    existing_urls = set(driver.execute_script("""
+        var videos = document.querySelectorAll('video');
+        var urls = [];
+        for (var i = 0; i < videos.length; i++) {
+            var src = videos[i].src || '';
+            if (src.indexOf('generated_videos') !== -1) urls.push(src.split('?')[0]);
+        }
+        return urls;
+    """) or [])
+    print(f"    {len(existing_urls)} existing video(s) on page, will watch for new one.")
+
     print("    Waiting for video to finish generating...")
     start_time = time.time()
-    last_url = None
 
     while time.time() - start_time < VIDEO_WAIT:
         time.sleep(10)
         elapsed = int(time.time() - start_time)
 
         try:
-            # Scan all <video> elements for a generated_videos .mp4 URL.
-            # The page always has video elements (timeline thumbnails etc.)
-            # so we specifically look for the final generated output URL.
+            # Scan all <video> elements for a NEW generated_videos .mp4 URL
+            # that wasn't on the page before we submitted.
             video_url = driver.execute_script("""
+                var existing = arguments[0];
                 var videos = document.querySelectorAll('video');
-                var mp4Urls = [];
                 for (var i = 0; i < videos.length; i++) {
                     var src = videos[i].src || '';
-                    if (src.indexOf('.mp4') !== -1 && src.indexOf('blob:') === -1) {
-                        mp4Urls.push(src);
+                    if (src.indexOf('generated_videos') !== -1) {
+                        var base = src.split('?')[0];
+                        if (existing.indexOf(base) === -1) return src;
                     }
                 }
-                // Prefer generated_videos URLs (final output)
-                for (var j = 0; j < mp4Urls.length; j++) {
-                    if (mp4Urls[j].indexOf('generated_videos') !== -1) return mp4Urls[j];
-                }
-                return mp4Urls.length > 0 ? mp4Urls[0] : null;
-            """)
+                return null;
+            """, list(existing_urls))
 
-            if video_url and video_url != last_url:
-                last_url = video_url
-                is_generated = "generated_videos" in video_url
-                if is_generated:
-                    print(f"    Generated video detected! ({elapsed}s elapsed)")
-                else:
-                    print(f"    Video URL found (not generated_videos yet, "
-                          f"may be preview). ({elapsed}s elapsed)")
-                    # Keep waiting for the generated_videos URL
-                    continue
+            if video_url:
+                print(f"    New generated video detected! ({elapsed}s elapsed)")
 
-                # Use the browser itself to download — it already has the
-                # right cookies/auth and Chrome's download dir is configured.
-                # We open the URL in a new tab to trigger a file download,
-                # then close the tab and wait for the download to finish.
-                print(f"    Triggering browser download...")
-                current_window = driver.current_window_handle
-                driver.execute_script("window.open(arguments[0], '_blank');",
-                                      video_url)
-                time.sleep(3)
-                # Close the new tab if it opened
-                if len(driver.window_handles) > 1:
-                    for handle in driver.window_handles:
-                        if handle != current_window:
-                            driver.switch_to.window(handle)
-                            driver.close()
-                    driver.switch_to.window(current_window)
+                # Use fetch() + blob + <a download> to force the browser to
+                # save the file (window.open would just play it in a tab).
+                print(f"    Downloading via browser fetch...")
+                download_filename = f"{title}.mp4"
+                driver.execute_script("""
+                    var url = arguments[0];
+                    var filename = arguments[1];
+                    fetch(url)
+                        .then(function(r) { return r.blob(); })
+                        .then(function(blob) {
+                            var a = document.createElement('a');
+                            a.href = URL.createObjectURL(blob);
+                            a.download = filename;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                        });
+                """, video_url, download_filename)
 
-                wait_for_download(downloads_dir, title)
+                wait_for_download(downloads_dir, title, timeout=180)
                 return
 
             # Still waiting
