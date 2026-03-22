@@ -417,7 +417,21 @@ def download_video_from_heygen(driver, title, downloads_dir):
         }
         return urls;
     """) or [])
-    print(f"    {len(existing_urls)} existing video(s) on page, will watch for new one.")
+    print(f"    DEBUG: {len(existing_urls)} existing generated_videos URL(s):")
+    for u in existing_urls:
+        print(f"      {u}")
+
+    # Also snapshot ALL video src URLs for debugging
+    all_video_srcs = driver.execute_script("""
+        return Array.from(document.querySelectorAll('video')).map(function(v, i) {
+            return {i: i, src: (v.src || '').substring(0, 120),
+                    displayed: v.offsetParent !== null,
+                    w: v.offsetWidth, h: v.offsetHeight};
+        });
+    """) or []
+    print(f"    DEBUG: All {len(all_video_srcs)} video elements at start:")
+    for v in all_video_srcs:
+        print(f"      [{v['i']}] {v['w']}x{v['h']} displayed={v['displayed']} src={v['src']}")
 
     print("    Waiting for video to finish generating...")
     start_time = time.time()
@@ -427,6 +441,22 @@ def download_video_from_heygen(driver, title, downloads_dir):
         elapsed = int(time.time() - start_time)
 
         try:
+            # DEBUG: dump all video srcs each poll
+            current_srcs = driver.execute_script("""
+                return Array.from(document.querySelectorAll('video')).map(function(v, i) {
+                    return {i: i, src: (v.src || '').substring(0, 150),
+                            displayed: v.offsetParent !== null,
+                            w: v.offsetWidth, h: v.offsetHeight};
+                });
+            """) or []
+            print(f"    DEBUG [{elapsed}s]: {len(current_srcs)} video elements:")
+            for v in current_srcs:
+                is_new = ("generated_videos" in v["src"] and
+                          v["src"].split("?")[0] not in existing_urls)
+                marker = " *** NEW ***" if is_new else ""
+                print(f"      [{v['i']}] {v['w']}x{v['h']} disp={v['displayed']} "
+                      f"src={v['src']}{marker}")
+
             # Scan all <video> elements for a NEW generated_videos .mp4 URL
             # that wasn't on the page before we submitted.
             video_url = driver.execute_script("""
@@ -444,25 +474,67 @@ def download_video_from_heygen(driver, title, downloads_dir):
 
             if video_url:
                 print(f"    New generated video detected! ({elapsed}s elapsed)")
+                print(f"    DEBUG: URL = {video_url[:200]}")
 
                 # Use fetch() + blob + <a download> to force the browser to
                 # save the file (window.open would just play it in a tab).
                 print(f"    Downloading via browser fetch...")
                 download_filename = f"{title}.mp4"
+
+                # Run fetch and capture success/failure via a window flag
                 driver.execute_script("""
+                    window.__downloadStatus = 'fetching';
                     var url = arguments[0];
                     var filename = arguments[1];
+                    console.log('DOWNLOAD: starting fetch for ' + url.substring(0, 100));
                     fetch(url)
-                        .then(function(r) { return r.blob(); })
+                        .then(function(r) {
+                            console.log('DOWNLOAD: fetch response status=' + r.status +
+                                        ' ok=' + r.ok + ' type=' + r.headers.get('content-type'));
+                            window.__downloadStatus = 'status=' + r.status;
+                            if (!r.ok) throw new Error('HTTP ' + r.status);
+                            return r.blob();
+                        })
                         .then(function(blob) {
+                            console.log('DOWNLOAD: blob size=' + blob.size + ' type=' + blob.type);
+                            window.__downloadStatus = 'blob_size=' + blob.size;
                             var a = document.createElement('a');
                             a.href = URL.createObjectURL(blob);
                             a.download = filename;
                             document.body.appendChild(a);
                             a.click();
                             document.body.removeChild(a);
+                            window.__downloadStatus = 'clicked_size=' + blob.size;
+                        })
+                        .catch(function(err) {
+                            console.error('DOWNLOAD ERROR: ' + err);
+                            window.__downloadStatus = 'error=' + err.message;
                         });
                 """, video_url, download_filename)
+
+                # Poll the download status flag
+                for i in range(30):
+                    time.sleep(2)
+                    status = driver.execute_script("return window.__downloadStatus;")
+                    print(f"    DEBUG: download status = {status}")
+                    if status and ("clicked_size=" in str(status) or
+                                   "error=" in str(status)):
+                        break
+
+                # Check browser console logs
+                try:
+                    logs = driver.get_log("browser")
+                    dl_logs = [l for l in logs if "DOWNLOAD" in l.get("message", "")]
+                    for log in dl_logs[-10:]:
+                        print(f"    DEBUG console: {log['message'][:200]}")
+                except Exception:
+                    pass
+
+                # List downloads directory
+                dl_files = list(downloads_dir.glob("*"))
+                print(f"    DEBUG: {len(dl_files)} files in downloads dir:")
+                for f in dl_files:
+                    print(f"      {f.name} ({f.stat().st_size} bytes)")
 
                 wait_for_download(downloads_dir, title, timeout=180)
                 return
@@ -477,7 +549,9 @@ def download_video_from_heygen(driver, title, downloads_dir):
                 break
 
         except Exception as e:
+            import traceback
             print(f"    Check error: {e}")
+            traceback.print_exc()
 
     print(f"    Could not auto-download video '{title}'.")
     print(f"    Please download it manually from {HEYGEN_URL}/videos")
